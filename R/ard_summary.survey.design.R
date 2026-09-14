@@ -166,6 +166,15 @@ ard_summary.survey.design <- function(data, variables, by = NULL,
 }
 
 .default_svy_stat_labels <- function(stat_label = NULL) {
+  pctile_names <- dplyr::tibble(
+    stat_name=paste0("p", 0:100),
+    stat_label=paste0(0:100, "% Percentile")
+  )
+  pctile_se_names <- pctile_names |>
+    dplyr::mutate(
+      stat_name = paste0(stat_name, ".std.error"),
+      stat_label=paste0("SE(", stat_label, ")")
+  )
   dplyr::tribble(
     ~stat_name, ~stat_label,
     "mean", "Mean",
@@ -175,20 +184,22 @@ ard_summary.survey.design <- function(data, variables, by = NULL,
     "sum", "Sum",
     "deff", "Design Effect",
     "mean.std.error", "SE(Mean)",
+    "median.std.error", "SE(Median)",
+    "sum.std.error", "SE(Sum)",
     "min", "Minimum",
-    "max", "Maximum",
-    "p25", "25% Percentile",
-    "p75", "75% Percentile"
-  )
+    "max", "Maximum"
+  ) |>
+    dplyr::bind_rows(pctile_names) |>
+    dplyr::bind_rows(pctile_se_names)
 }
 
 accepted_svy_stats <- function(expand_quantiles = TRUE) {
   base_stats <-
-    c("mean", "median", "min", "max", "sum", "var", "sd", "mean.std.error", "deff")
+    c("mean", "median", "min", "max", "sum", "var", "sd", "mean.std.error", "median.std.error", "sum.std.error",  "deff")
   if (expand_quantiles) {
-    return(c(base_stats, paste0("p", 0:100)))
+    return(c(base_stats, paste0("p", 0:100), paste0("p", 0:100, ".std.error")))
   }
-  c(base_stats, "p##")
+  c(base_stats, "p##", "p##.std.error")
 }
 
 
@@ -206,6 +217,7 @@ accepted_svy_stats <- function(expand_quantiles = TRUE) {
   else if (stat_name %in% "var") args <- list(FUN = survey::svyvar)
   else if (stat_name %in% "sd") args <- list(FUN = \(...) survey::svyvar(...) |> sqrt())
   else if (stat_name %in% "mean.std.error") args <- list(FUN = \(...) survey::svymean(...) |> survey::SE())
+  else if (stat_name %in% "sum.std.error") args <- list(FUN = \(...) survey::svytotal(...) |> survey::SE())
   else if (stat_name %in% "deff") args <- list(FUN = \(...) survey::svymean(..., deff = TRUE) |> survey::deff())
   else if (stat_name %in% "min") args <- list(FUN = \(x, design, na.rm, ...) min(design$variables[[all.vars(x)]][stats::weights(design) > 0], na.rm = na.rm))
   else if (stat_name %in% "max") args <- list(FUN = \(x, design, na.rm, ...) max(design$variables[[all.vars(x)]][stats::weights(design) > 0], na.rm = na.rm))
@@ -216,6 +228,12 @@ accepted_svy_stats <- function(expand_quantiles = TRUE) {
     args <-
       if (is_empty(by)) list(FUN = \(...) survey::svyquantile(...)[[1]], quantiles = quantile)
     else list(FUN = \(...) survey::svyquantile(...), quantiles = quantile)
+  } else if (stat_name %in% c("median.std.error", paste0("p", 0:100, ".std.error"))) {
+    quantile <- ifelse(stat_name %in% "median.std.error", 0.5,  as.numeric(substr(stat_name, 2, nchar(stat_name)-nchar(".std.error"))) / 100)
+    # univariate results are returned in a different format from stratified.
+    args <-
+      if (is_empty(by)) list(FUN = \(...) survey::svyquantile(...) |> survey::SE(), quantiles = quantile)
+    else list(FUN = \(...) survey::svyquantile(...) |> survey::SE(), quantiles = quantile)
   }
   # styler: on
 
